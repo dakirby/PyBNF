@@ -167,8 +167,8 @@ class Configuration(object):
             'parallelize_models': 1,
 
             #setting default values for PSADE
-            'temperature_minimum': 10**(-10), 'radium_maximum': 1,'radius_minimum': 10**(-6), 'tau1': 0.01, 'tau2': 0.1,
-            'cross_probability_minimum': 0.1, 'cross_probability_maximum': 0.9, 'weight_minimum': 0.5,'weight_maximum': 1.5,
+            'temperature_min': 10**(-10), 'radius_max': 1,'radius_min': 10**(-6), 'tau1': 0.01, 'tau2': 0.1,
+            'cross_probability_min': 0.1, 'cross_probability_max': 0.9, 'weight_min': 0.5,'weight_max': 1.5,
 
 
             'mutation_rate': 0.5, 'mutation_factor': 0.5, 'islands': 1, 'migrate_every': 20, 'num_to_migrate': 3,
