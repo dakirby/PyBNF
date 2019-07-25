@@ -29,6 +29,8 @@ from glob import glob
 from tornado import gen
 from distributed.client import _wait
 from concurrent.futures._base import CancelledError
+import numpy as np
+from collections import defaultdict
 
 
 logger = logging.getLogger(__name__)
@@ -2787,8 +2789,13 @@ class PSADEBase(Algorithm):
         super(PSADEBase, self).__init__(config)
 
         self.population_size = config.config['population_size']
-        self.min_temp = config.config['min_temp']
-        self.min_radius = config.config['min_radius']
+        self.temperature_min = config.config['temperature_min']
+        self.weight_min = config.config['weight_min']
+        self.weight_max = config.config['weight_max']
+        self.radius_min = config.config['radius_min']
+        self.radius_max = config.config['radius_max']
+        self.tau1 = config.config['tau1']
+        self.tau2 = config.config['tau2']
 
         self.individuals = []
 
@@ -2815,12 +2822,28 @@ class PSADE(PSADEBase):
         self.sims_completed = 0
         self.individuals = []  # List of individuals
         self.fitnesses = []  # List of same shape, gives fitness of each individual
+        
 
     def start_run(self):
         print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.population_size))
+        if self.config.config['initialization'] == 'lh':
+            first_psets = self.random_latin_hypercube_psets(self.num_parallel)
+        else:
+            first_psets = [self.random_pset() for i in range(self.num_parallel)]
 
-        # Initialize random individuals
-        self.individuals = self.random_latin_hypercube_psets(self.population_size)
+        #self.ln_current_P = [np.nan]*self.num_parallel  # Forces accept on the first run
+        #self.current_pset = [None]*self.num_parallel
+        for i in range(len(first_psets)):
+            first_psets[i].name = 'iter0run%i' % i
+
+        # Set up the output files
+        # Cant do this in the constructor because that happens before the output folder is potentially overwritten.
+        #if setup_samples:
+        #    with open(self.samples_file, 'w') as f:
+        #        f.write('# Name\tLn_probability\t'+first_psets[0].keys_to_string()+'\n')
+        #    os.makedirs(self.config.config['output_dir'] + '/Results/Histograms/', exist_ok=True)
+
+        return first_psets
 
     def got_result(self, res):
         ########################
@@ -2839,9 +2862,7 @@ class PSADE(PSADEBase):
         # should change to while (T > T_min)
         # three condition to accept: if f is smaller; local step; MH accept
 
-        import numpy as np
-        import matplotlib.pyplot as plt
-        from collections import defaultdict
+       
 
         # define cost_function
         # def cost_function():
@@ -2907,14 +2928,18 @@ class PSADE(PSADEBase):
             vect = np.where(bool_list, mut_vect, ori_vect)
             return vect
 
-        def SADE(obj, bounds,
-                 crossp_bound=[0.1, 0.9],
-                 radius_bound=[10 ** (-6), 1],
-                 weight_bound=[0.5, 1.5],
-                 pop_size=20,
-                 iterations=1000):
+        def PSADE(self):
+            """
+            obj, bounds,
+                 crossp_bound=[0.1, 0.9] #default,
+                 radius_bound=[10 ** (-6), 1] #default,
+                 weight_bound=[0.5, 1.5] #default,
+                 pop_size=20 #super-class,
+                 iterations=1000 #super-class
+            """
+            
             parameters_record = defaultdict(list)
-            dimensions = len(bounds)  # calculate the dimension of each set of population
+            dimensions = len(self.bounds)  # calculate the dimension of each set of population
             init_population = latin_hypercube(pop_size, dimensions)  # initial NORMALIZED population generation
             min_bound, max_bound = np.asarray(bounds).T  # calculate the boundary of the dataset
             ranges = abs(min_bound - max_bound)
