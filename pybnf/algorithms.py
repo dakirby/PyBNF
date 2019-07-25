@@ -2796,6 +2796,8 @@ class PSADEBase(Algorithm):
         self.radius_max = config.config['radius_max']
         self.tau1 = config.config['tau1']
         self.tau2 = config.config['tau2']
+        self.crossp_min = config.config['cross_probability_min']
+        self.crossp_max = config.config['cross_probability_max']
 
         self.individuals = []
 
@@ -2822,6 +2824,17 @@ class PSADE(PSADEBase):
         self.sims_completed = 0
         self.individuals = []  # List of individuals
         self.fitnesses = []  # List of same shape, gives fitness of each individual
+        self.individual_parameters = []
+        for i in range(self.num_parallel):
+            coefficient = (1 / (self.num_parallel - 1)) * np.log(self.temperature_max / self.temperature_min)
+            temperature = self.temperature_max * np.exp(-coefficient * i)
+            coefficient = (1 / (self.num_parallel - 1)) * np.log(self.radius_max / self.radius_min)
+            radius = self.radius_max * np.exp(-coefficient * i)
+            coefficient = (1 / (self.num_parallel - 1)) * np.log(self.crossp_max / self.crossp_min)
+            crossp = self.crossp_max * np.exp(-coefficient * i)
+            weight = np.random.uniform(self.weight_min, self.weight_max)
+            self.individual_parameters.append([inf, temperature, radius, crossp, weight])
+            
         
 
     def start_run(self):
@@ -2844,8 +2857,59 @@ class PSADE(PSADEBase):
         #    os.makedirs(self.config.config['output_dir'] + '/Results/Histograms/', exist_ok=True)
 
         return first_psets
+    
+            # function for parameter determination for each iteration
+    def parameters_determination(self, base_idx):
+        if np.random.uniform(0, 1) < self.tau2:
+            parameter = np.random.uniform(self.weight_min, self.weight_max)
+        else:
+            parameter = self.individual_parameters[base_idx][4]
+        return parameter
+    
+    def new_individual(self, individuals, base_index=None):
+        """
+        Create a new individual for the specified island, according to the set strategy
+        :param base_index: The index to use for the new individual, or None for a random index.
+        :return:
+        """
 
-    def got_result(self, res):
+        # Choose a starting parameter set (either a random one or the base_index specified)
+        # and others to cross over (always random)
+
+       # if '1' in self.strategy:
+        pickn = 3
+        #else:
+        #    pickn = 5
+
+        # Choose pickn random unique indices, or if base_index was given, choose base_index followed by pickn-1 unique
+        # indices
+        picks = np.random.choice(len(individuals), pickn, replace=False)
+        if base_index is not None:
+            if base_index in picks:
+                # If we accidentally picked base_index, replace it with picks[0], preserving uniqueness in our list
+                iswitch = list(picks).index(base_index)
+                picks[iswitch] = picks[0]
+            # Now overwrite picks[0] with base_index. If we have base_index, picks[0] was an "extra pick" we only needed
+            # in case we sampled base_index and had to replace it.
+            picks[0] = base_index
+        base = individuals[picks[0]]
+        others = [individuals[p] for p in picks[1:]]
+
+        # Iterate through parameters; decide whether to mutate or leave the same.
+        
+        new_pset_vars = []
+        mutation_factor = np.random.uniform(0, 1) * parameters_determination(self, base_idx)
+        for p in base:
+            if np.random.random() < base.individual_parameters[base_index][2]: #
+                update_val = self.mutation_factor * others[0].get_param(p.name).diff(others[1].get_param(p.name))
+                new_pset_vars.append(p.add(update_val))
+            else:
+                new_pset_vars.append(p)
+        
+
+        return PSet(new_pset_vars)
+    
+   # def got_result(self, res):
         ########################
         # default values:
         # mutant factor (determine the diameter of searching size) = 0.8
@@ -2862,12 +2926,25 @@ class PSADE(PSADEBase):
         # should change to while (T > T_min)
         # three condition to accept: if f is smaller; local step; MH accept
 
-       
+    def parameters_generation(self):
+        coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
+        return para_bounds[1] * np.exp(-coefficient * i)   
 
         # define cost_function
         # def cost_function():
         #    return
+    def got_result(self, res):
+        """
+        Called by the scheduler when a simulation is completed, with the pset that was run, and the resulting simulation
+        data
+        :param res: PSet that was run in this simulation
+        :type res: Result
+        :return: List of PSet(s) to be run next.
+        """
 
+        pset = res.pset
+        score = res.score
+        
         # define MH criterion
         def mh(obj, current, trial, temperature):
             return min(1, np.exp(-(obj(trial) - obj(current)) / temperature))
