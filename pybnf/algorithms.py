@@ -2831,7 +2831,7 @@ class PSADE(PSADEBase):
             coefficient = (1 / (self.num_parallel - 1)) * np.log(self.radius_max / self.radius_min)
             radius = self.radius_max * np.exp(-coefficient * i)
             coefficient = (1 / (self.num_parallel - 1)) * np.log(self.crossp_max / self.crossp_min)
-            crossp = self.crossp_max * np.exp(-coefficient * i)
+            crossp = self.crossp_min * np.exp(coefficient * i)
             weight = np.random.uniform(self.weight_min, self.weight_max)
             self.individual_parameters.append([inf, temperature, radius, crossp, weight])
             
