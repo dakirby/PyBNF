@@ -3006,7 +3006,7 @@ class PSADE(PSADEBase):
         score = res.score
         
         island, j = self.island_map.pop(pset)
-        fitness = score
+        #fitness = score
         if fitness <= self.fitnesses[island][j]:
             self.individuals[island][j] = pset
             self.fitnesses[island][j] = fitness
