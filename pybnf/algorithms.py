@@ -2837,26 +2837,7 @@ class PSADE(PSADEBase):
             
         
 
-    def start_run(self):
-        print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.population_size))
-        if self.config.config['initialization'] == 'lh':
-            first_psets = self.random_latin_hypercube_psets(self.num_parallel)
-        else:
-            first_psets = [self.random_pset() for i in range(self.num_parallel)]
-
-        #self.ln_current_P = [np.nan]*self.num_parallel  # Forces accept on the first run
-        #self.current_pset = [None]*self.num_parallel
-        for i in range(len(first_psets)):
-            first_psets[i].name = 'iter0run%i' % i
-
-        # Set up the output files
-        # Cant do this in the constructor because that happens before the output folder is potentially overwritten.
-        #if setup_samples:
-        #    with open(self.samples_file, 'w') as f:
-        #        f.write('# Name\tLn_probability\t'+first_psets[0].keys_to_string()+'\n')
-        #    os.makedirs(self.config.config['output_dir'] + '/Results/Histograms/', exist_ok=True)
-
-        return first_psets
+    
     
             # function for parameter determination for each iteration
     def parameters_determination(self, base_idx):
@@ -2904,10 +2885,67 @@ class PSADE(PSADEBase):
                 update_val = self.mutation_factor * others[0].get_param(p.name).diff(others[1].get_param(p.name))
                 new_pset_vars.append(p.add(update_val))
             else:
-                new_pset_vars.append(p)
-        
-
+                new_pset_vars.append(p) 
         return PSet(new_pset_vars)
+    
+    def mh(obj, current, trial, temperature):
+        return min(1, np.exp(-(obj(trial) - obj(current)) / temperature))
+
+    # randomly pick two vecotrs and exchange their T, R if needed
+    def randomly_compete(psets, pop_size):
+        a, b = np.random.choice([i for i in range(pop_size)], 2)
+        if np.random.uniform(0, 1) < min(1, np.exp(
+                -(1 / psets.get(b)[1] - 1 / psets.get(a)[1]) * (psets.get(b)[0] - psets.get(a)[0]))):
+            psets.get(a)[1:3], psets.get(b)[1:3] = psets.get(b)[1:3], psets.get(a)[1:3]
+        return
+
+    # select control vector
+    def control_selection(psets, pop_size):
+        combine = [(values, keys) for keys, values in psets.items()]
+        combine = sorted(combine, key=lambda x: x[0][0])
+        total_prob = sum(np.exp(-i - 1) for i in range(pop_size))
+        prob_weights = [np.exp(-i - 1) / total_prob for i in range(pop_size)]
+        sorted_control_vector_number = np.random.choice(range(1, pop_size + 1), 1, prob_weights)[0]
+        control_vector_number = combine[sorted_control_vector_number - 1][1]
+        return control_vector_number
+
+    # generate initial data points in latin hypercube fashion
+    def latin_hypercube(num_vectors, num_elements_per_vect):
+        high, low = 1, 0
+        step_size = (high - low) / num_elements_per_vect
+        lower_limits = np.arange(0, 1, step_size)
+        upper_limits = lower_limits + step_size
+        rand_points = [[np.random.uniform(lower_limits[i], upper_limits[i]) for i in range(num_elements_per_vect)]
+                       for _ in range(num_vectors)]
+        rand_points = np.asarray(rand_points)
+        return rand_points
+
+    # function for parameter determination for each iteration
+    def parameters_determination(coefficient, probability, bounds):
+        if np.random.uniform(0, 1) < probability:
+            parameter = np.random.uniform(bounds[0], bounds[1])
+        else:
+            parameter = coefficient
+        return parameter
+
+    # function for parameter generation (e.g. R, T, etc.)
+    def parameters_generation(i, para_bounds, pop_size):
+        coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
+        return para_bounds[1] * np.exp(-coefficient * i)
+
+    # deal with the out-of-bound elements in NORMALIZED vector
+    def clipping_func(mutated_vectors, dimensions):
+        for k in range(dimensions):
+            if mutated_vectors[k] > 1 or mutated_vectors[k] < 0:
+                mutated_vectors[k] = np.random.uniform(0, 1)
+        return mutated_vectors
+
+    # function to determine the element substitution
+    def substitution(bool_list, dimensions, ori_vect, mut_vect):
+        if not np.any(bool_list):
+            bool_list[np.random.randint(0, dimensions)] = True
+        vect = np.where(bool_list, mut_vect, ori_vect)
+        return vect
     
    # def got_result(self, res):
         ########################
@@ -2933,6 +2971,28 @@ class PSADE(PSADEBase):
         # define cost_function
         # def cost_function():
         #    return
+        
+    def start_run(self):
+        print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.population_size))
+        if self.config.config['initialization'] == 'lh':
+            first_psets = self.random_latin_hypercube_psets(self.num_parallel)
+        else:
+            first_psets = [self.random_pset() for i in range(self.num_parallel)]
+
+        #self.ln_current_P = [np.nan]*self.num_parallel  # Forces accept on the first run
+        #self.current_pset = [None]*self.num_parallel
+        for i in range(len(first_psets)):
+            first_psets[i].name = 'iter0run%i' % i
+
+        # Set up the output files
+        # Cant do this in the constructor because that happens before the output folder is potentially overwritten.
+        #if setup_samples:
+        #    with open(self.samples_file, 'w') as f:
+        #        f.write('# Name\tLn_probability\t'+first_psets[0].keys_to_string()+'\n')
+        #    os.makedirs(self.config.config['output_dir'] + '/Results/Histograms/', exist_ok=True)
+
+        return first_psets
+    
     def got_result(self, res):
         """
         Called by the scheduler when a simulation is completed, with the pset that was run, and the resulting simulation
@@ -2945,6 +3005,7 @@ class PSADE(PSADEBase):
         pset = res.pset
         score = res.score
         
+        """
         # define MH criterion
         def mh(obj, current, trial, temperature):
             return min(1, np.exp(-(obj(trial) - obj(current)) / temperature))
@@ -3004,6 +3065,7 @@ class PSADE(PSADEBase):
                 bool_list[np.random.randint(0, dimensions)] = True
             vect = np.where(bool_list, mut_vect, ori_vect)
             return vect
+        """
 
         def PSADE(self):
             """
@@ -3015,7 +3077,7 @@ class PSADE(PSADEBase):
                  iterations=1000 #super-class
             """
             
-            parameters_record = defaultdict(list)
+            #parameters_record = defaultdict(list)
             dimensions = len(self.bounds)  # calculate the dimension of each set of population
             init_population = latin_hypercube(pop_size, dimensions)  # initial NORMALIZED population generation
             min_bound, max_bound = np.asarray(bounds).T  # calculate the boundary of the dataset
