@@ -3005,6 +3005,12 @@ class PSADE(PSADEBase):
         pset = res.pset
         score = res.score
         
+        island, j = self.island_map.pop(pset)
+        fitness = score
+        if fitness <= self.fitnesses[island][j]:
+            self.individuals[island][j] = pset
+            self.fitnesses[island][j] = fitness
+        
         """
         # define MH criterion
         def mh(obj, current, trial, temperature):
