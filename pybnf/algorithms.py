@@ -2926,9 +2926,9 @@ class PSADE(PSADEBase):
         # should change to while (T > T_min)
         # three condition to accept: if f is smaller; local step; MH accept
 
-    def parameters_generation(self):
-        coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
-        return para_bounds[1] * np.exp(-coefficient * i)   
+    #def parameters_generation(self):
+    #    coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
+    #    return para_bounds[1] * np.exp(-coefficient * i)   
 
         # define cost_function
         # def cost_function():
