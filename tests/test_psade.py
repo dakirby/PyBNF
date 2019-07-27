@@ -41,8 +41,12 @@ class TestPSADE:
         start_params = psade.start_run()
 
         # Run iteration 1
-        for i in range(20):
+        for i in range(19):
             res = algorithms.Result(start_params[i], self.data1s, start_params[i].name)
             res.score = 42.
             torun = psade.got_result(res)
-            assert torun != []
+            assert torun == []
+        res = algorithms.Result(start_params[19], self.data1s, start_params[19].name)
+        res.score = 42.
+        torun = psade.got_result(res)
+        assert torun == psade.individuals

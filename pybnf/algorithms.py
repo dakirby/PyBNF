@@ -2826,17 +2826,8 @@ class PSADE(PSADEBase):
         self.sims_completed = 0
         self.individuals = []  # List of individuals
         self.individual_parameters = []
-        self.temperature_max = 1 # THIS IS A PLACEHOLDER FOR NOW
-
-        for i in range(self.num_parallel):
-            coefficient = (1 / (self.num_parallel - 1)) * np.log(self.temperature_max / self.temperature_min)
-            temperature = self.temperature_max * np.exp(-coefficient * i)
-            coefficient = (1 / (self.num_parallel - 1)) * np.log(self.radius_max / self.radius_min)
-            radius = self.radius_max * np.exp(-coefficient * i)
-            coefficient = (1 / (self.num_parallel - 1)) * np.log(self.crossp_max / self.crossp_min)
-            crossp = self.crossp_min * np.exp(coefficient * i)
-            weight = np.random.uniform(self.weight_min, self.weight_max)
-            self.individual_parameters.append([np.Inf, temperature, radius, crossp, weight])
+        self.temperature_max = None # THIS IS A PLACEHOLDER FOR NOW
+        self.test_scores = []
 
         self.dimensions = 0 # self.individuals[0].__len__()
 
@@ -2964,26 +2955,48 @@ class PSADE(PSADEBase):
         pset = res.pset
         score = res.score
 
-        parameters = self.individual_parameters[self.individuals.index(pset)]
-        old_parameters = copy.deepcopy(parameters)
+        # Tmax initialization block
+        if self.temperature_max is None: # If still initializing Tmax
+            if len(self.test_scores) < self.num_parallel: # If still collecting test scores
+                self.test_scores.append(score)
+            if len(self.test_scores) == self.num_parallel: # If all test scores have been returned
+                self.temperature_max = max(self.test_scores) - min(self.test_scores)
+                # Generate parameters for each individual
+                for i in range(self.num_parallel):
+                    coefficient = (1 / (self.num_parallel - 1)) * np.log(self.temperature_max / self.temperature_min)
+                    temperature = self.temperature_max * np.exp(-coefficient * i)
+                    coefficient = (1 / (self.num_parallel - 1)) * np.log(self.radius_max / self.radius_min)
+                    radius = self.radius_max * np.exp(-coefficient * i)
+                    coefficient = (1 / (self.num_parallel - 1)) * np.log(self.crossp_max / self.crossp_min)
+                    crossp = self.crossp_min * np.exp(coefficient * i)
+                    weight = np.random.uniform(self.weight_min, self.weight_max)
+                    self.individual_parameters.append([np.Inf, temperature, radius, crossp, weight])
+                return copy.deepcopy(self.individuals) # Start PSADE algorithm on all individuals
+            else: # Still waiting for other test scores
+                return []
 
-        if score <= parameters[0]:
-            self.individuals[self.individuals.index(pset)] = pset
-            self.individual_parameters[self.individuals.index(pset)][0] = score
-        elif self.distance_calculation(pset, self.num_parallel) < old_parameters[2]:
-            self.individuals[self.individuals.index(pset)] = pset
-            self.individual_parameters[self.individuals.index(pset)][0] = score
-        elif np.random.uniform(0, 1) < self.mh(old_parameters, score):
-            self.individuals[self.individuals.index(pset)] = pset
-            self.individual_parameters[self.individuals.index(pset)][0] = score
-        base_index = np.random.choice(range(self.num_parallel), 1)[0]
-        new_pset = self.new_individual(base_index)
+        # Run PSADE algorithm on individual
+        else:
+            parameters = self.individual_parameters[self.individuals.index(pset)]
+            old_parameters = copy.deepcopy(parameters)
 
-        self.sims_completed += 1
-        if self.sims_completed >= self.max_iterations*self.num_parallel:
-            return 'STOP'
+            if score <= parameters[0]:
+                self.individuals[self.individuals.index(pset)] = pset
+                self.individual_parameters[self.individuals.index(pset)][0] = score
+            elif self.distance_calculation(pset, self.num_parallel) < old_parameters[2]:
+                self.individuals[self.individuals.index(pset)] = pset
+                self.individual_parameters[self.individuals.index(pset)][0] = score
+            elif np.random.uniform(0, 1) < self.mh(old_parameters, score):
+                self.individuals[self.individuals.index(pset)] = pset
+                self.individual_parameters[self.individuals.index(pset)][0] = score
+            base_index = np.random.choice(range(self.num_parallel), 1)[0]
+            new_pset = self.new_individual(base_index)
 
-        return [new_pset]
+            self.sims_completed += 1
+            if self.sims_completed >= self.max_iterations*self.num_parallel:
+                return 'STOP'
+
+            return [new_pset]
 
 
 
