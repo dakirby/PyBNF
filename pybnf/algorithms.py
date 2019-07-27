@@ -2787,8 +2787,7 @@ class PSADEBase(Algorithm):
 
     def __init__(self, config):
         super(PSADEBase, self).__init__(config)
-
-        self.population_size = config.config['population_size']
+        self.num_parallel = config.config['population_size']
         self.temperature_min = config.config['temperature_min']
         self.weight_min = config.config['weight_min']
         self.weight_max = config.config['weight_max']
@@ -2798,8 +2797,11 @@ class PSADEBase(Algorithm):
         self.tau2 = config.config['tau2']
         self.crossp_min = config.config['cross_probability_min']
         self.crossp_max = config.config['cross_probability_max']
+        self.max_iterations = config.config['max_iterations']
 
         self.individuals = []
+
+
 
     def start_run(self):
         return NotImplementedError("got_result() not implemented in PSADEBase class")
@@ -2823,8 +2825,8 @@ class PSADE(PSADEBase):
         self.variables = []
         self.sims_completed = 0
         self.individuals = []  # List of individuals
-        self.fitnesses = []  # List of same shape, gives fitness of each individual
         self.individual_parameters = []
+
         for i in range(self.num_parallel):
             coefficient = (1 / (self.num_parallel - 1)) * np.log(self.temperature_max / self.temperature_min)
             temperature = self.temperature_max * np.exp(-coefficient * i)
@@ -2833,21 +2835,54 @@ class PSADE(PSADEBase):
             coefficient = (1 / (self.num_parallel - 1)) * np.log(self.crossp_max / self.crossp_min)
             crossp = self.crossp_min * np.exp(coefficient * i)
             weight = np.random.uniform(self.weight_min, self.weight_max)
-            self.individual_parameters.append([inf, temperature, radius, crossp, weight])
-            
-        
+            self.individual_parameters.append([np.Inf, temperature, radius, crossp, weight])
+        self.dimensions = self.individuals[0].__len__()
 
-    
-    
+
+
             # function for parameter determination for each iteration
-    def parameters_determination(self, base_idx):
+    def parameters_determination(self, idx):
         if np.random.uniform(0, 1) < self.tau2:
             parameter = np.random.uniform(self.weight_min, self.weight_max)
         else:
-            parameter = self.individual_parameters[base_idx][4]
+            parameter = self.individual_parameters[idx][4]
         return parameter
-    
-    def new_individual(self, individuals, base_index=None):
+
+    def mh(old_parameters, score):
+        return min(1, np.exp(-(score - old_parameters[0]) / old_parameters[1]))
+
+    # randomly pick two vecotrs and exchange their T, R if needed
+    def randomly_compete(self):
+        a, b = np.random.choice([i for i in range(self.num_parallel)], 2)
+        if np.random.uniform(0, 1) < min(1, np.exp(
+                -(1 / self.individual_parameters[b][1] - 1 / self.individual_parameters[a][1])
+                * (self.individual_parameters[b][0] - self.individual_parameters[a][0]))):
+            self.individual_parameters[a][1:3], self.individual_parameters[b][1:3] = self.individual_parameters[b][1:3], self.individual_parameters[a][1:3]
+        return
+
+    # select control vector
+    def control_selection(self):
+        combine = sorted(self.individual_parameters, key=lambda x: x[0])
+        total_prob = sum(np.exp(-i - 1) for i in range(self.num_parallel))
+        prob_weights = [np.exp(-i - 1) / total_prob for i in range(self.num_parallel)]
+        sorted_control_vector_number = np.random.choice(range(self.num_parallel), 1, prob_weights)[0]
+        control_vector_number = self.individual_parameters.index(combine[sorted_control_vector_number])
+        return control_vector_number
+
+    # function for parameter determination for each iteration
+    def parameters_determination(self, coefficient_position, control_number, bounds):
+        if np.random.uniform(0, 1) < self.tau2:
+            parameter = np.random.uniform(bounds[0], bounds[1])
+        else:
+            parameter = self.individual_parameters[control_number][coefficient_position]
+        return parameter
+
+    def distance_calculation(self, pset):
+        temp = [(self.individuals[self.individuals.index(pset)][k] - pset[k])**2 for k in range(self.dimensions)]
+        distance = np.sqrt(sum(temp))
+        return distance
+
+    def new_individual(self, base_index=None):
         """
         Create a new individual for the specified island, according to the set strategy
         :param base_index: The index to use for the new individual, or None for a random index.
@@ -2857,14 +2892,17 @@ class PSADE(PSADEBase):
         # Choose a starting parameter set (either a random one or the base_index specified)
         # and others to cross over (always random)
 
-       # if '1' in self.strategy:
         pickn = 3
-        #else:
-        #    pickn = 5
+        randomly_compete(self)
 
         # Choose pickn random unique indices, or if base_index was given, choose base_index followed by pickn-1 unique
         # indices
-        picks = np.random.choice(len(individuals), pickn, replace=False)
+        control_number = control_selection(self)
+        control_parameters = self.individual_parameters[control_number]
+        radius = control_parameters[2]
+        weight = np.random.uniform(0, 1) * parameters_determination(self, 4, base_index, [self.weight_min, self.weight_max])
+        cross_probability = parameters_determination(self, 3, base_index, [self.crossp_min, self.crossp_max])
+        picks = np.random.choice(self.dimensions, pickn, replace=False)
         if base_index is not None:
             if base_index in picks:
                 # If we accidentally picked base_index, replace it with picks[0], preserving uniqueness in our list
@@ -2873,104 +2911,21 @@ class PSADE(PSADEBase):
             # Now overwrite picks[0] with base_index. If we have base_index, picks[0] was an "extra pick" we only needed
             # in case we sampled base_index and had to replace it.
             picks[0] = base_index
-        base = individuals[picks[0]]
-        others = [individuals[p] for p in picks[1:]]
+        base = self.individuals[picks[0]]
+        others = [self.individuals[p] for p in picks[1:]]
 
         # Iterate through parameters; decide whether to mutate or leave the same.
-        
+
         new_pset_vars = []
-        mutation_factor = np.random.uniform(0, 1) * parameters_determination(self, base_idx)
+        r = radius * np.tan(np.pi * (np.random.uniform(0, 1) - 0.5))
         for p in base:
-            if np.random.random() < base.individual_parameters[base_index][2]: #
-                update_val = self.mutation_factor * others[0].get_param(p.name).diff(others[1].get_param(p.name))
+            if np.random.random() < cross_probability:  #
+                update_val = others[0] + weight * others[1].diff(others[2])
                 new_pset_vars.append(p.add(update_val))
             else:
-                new_pset_vars.append(p) 
+                new_pset_vars.append(p)
+        new_pset_vars += r
         return PSet(new_pset_vars)
-    
-    def mh(obj, current, trial, temperature):
-        return min(1, np.exp(-(obj(trial) - obj(current)) / temperature))
-
-    # randomly pick two vecotrs and exchange their T, R if needed
-    def randomly_compete(psets, pop_size):
-        a, b = np.random.choice([i for i in range(pop_size)], 2)
-        if np.random.uniform(0, 1) < min(1, np.exp(
-                -(1 / psets.get(b)[1] - 1 / psets.get(a)[1]) * (psets.get(b)[0] - psets.get(a)[0]))):
-            psets.get(a)[1:3], psets.get(b)[1:3] = psets.get(b)[1:3], psets.get(a)[1:3]
-        return
-
-    # select control vector
-    def control_selection(psets, pop_size):
-        combine = [(values, keys) for keys, values in psets.items()]
-        combine = sorted(combine, key=lambda x: x[0][0])
-        total_prob = sum(np.exp(-i - 1) for i in range(pop_size))
-        prob_weights = [np.exp(-i - 1) / total_prob for i in range(pop_size)]
-        sorted_control_vector_number = np.random.choice(range(1, pop_size + 1), 1, prob_weights)[0]
-        control_vector_number = combine[sorted_control_vector_number - 1][1]
-        return control_vector_number
-
-    # generate initial data points in latin hypercube fashion
-    def latin_hypercube(num_vectors, num_elements_per_vect):
-        high, low = 1, 0
-        step_size = (high - low) / num_elements_per_vect
-        lower_limits = np.arange(0, 1, step_size)
-        upper_limits = lower_limits + step_size
-        rand_points = [[np.random.uniform(lower_limits[i], upper_limits[i]) for i in range(num_elements_per_vect)]
-                       for _ in range(num_vectors)]
-        rand_points = np.asarray(rand_points)
-        return rand_points
-
-    # function for parameter determination for each iteration
-    def parameters_determination(coefficient, probability, bounds):
-        if np.random.uniform(0, 1) < probability:
-            parameter = np.random.uniform(bounds[0], bounds[1])
-        else:
-            parameter = coefficient
-        return parameter
-
-    # function for parameter generation (e.g. R, T, etc.)
-    def parameters_generation(i, para_bounds, pop_size):
-        coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
-        return para_bounds[1] * np.exp(-coefficient * i)
-
-    # deal with the out-of-bound elements in NORMALIZED vector
-    def clipping_func(mutated_vectors, dimensions):
-        for k in range(dimensions):
-            if mutated_vectors[k] > 1 or mutated_vectors[k] < 0:
-                mutated_vectors[k] = np.random.uniform(0, 1)
-        return mutated_vectors
-
-    # function to determine the element substitution
-    def substitution(bool_list, dimensions, ori_vect, mut_vect):
-        if not np.any(bool_list):
-            bool_list[np.random.randint(0, dimensions)] = True
-        vect = np.where(bool_list, mut_vect, ori_vect)
-        return vect
-    
-   # def got_result(self, res):
-        ########################
-        # default values:
-        # mutant factor (determine the diameter of searching size) = 0.8
-        # cross probability (determine whether to substitute the current vector element with mutated one)
-        # population size (the number of generated inital vectors) = 20
-        # number of elements in each population = 32
-        # iterations = 1000
-        #
-        # parameters that needed:
-        # object functions: fobj
-        # bounds for each element in the population: bounds
-        #########################
-
-        # should change to while (T > T_min)
-        # three condition to accept: if f is smaller; local step; MH accept
-
-    #def parameters_generation(self):
-    #    coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
-    #    return para_bounds[1] * np.exp(-coefficient * i)   
-
-        # define cost_function
-        # def cost_function():
-        #    return
         
     def start_run(self):
         print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.population_size))
@@ -2978,6 +2933,7 @@ class PSADE(PSADEBase):
             first_psets = self.random_latin_hypercube_psets(self.num_parallel)
         else:
             first_psets = [self.random_pset() for i in range(self.num_parallel)]
+        self.individuals = first_psets
 
         #self.ln_current_P = [np.nan]*self.num_parallel  # Forces accept on the first run
         #self.current_pset = [None]*self.num_parallel
@@ -2991,7 +2947,7 @@ class PSADE(PSADEBase):
         #        f.write('# Name\tLn_probability\t'+first_psets[0].keys_to_string()+'\n')
         #    os.makedirs(self.config.config['output_dir'] + '/Results/Histograms/', exist_ok=True)
 
-        return first_psets
+        return copy.deepcopy(self.individuals)
     
     def got_result(self, res):
         """
@@ -3004,178 +2960,28 @@ class PSADE(PSADEBase):
 
         pset = res.pset
         score = res.score
-        
-        island, j = self.island_map.pop(pset)
-        #fitness = score
-        if fitness <= self.fitnesses[island][j]:
-            self.individuals[island][j] = pset
-            self.fitnesses[island][j] = fitness
-        
-        """
-        # define MH criterion
-        def mh(obj, current, trial, temperature):
-            return min(1, np.exp(-(obj(trial) - obj(current)) / temperature))
 
-        # randomly pick two vecotrs and exchange their T, R if needed
-        def randomly_compete(psets, pop_size):
-            a, b = np.random.choice([i for i in range(pop_size)], 2)
-            if np.random.uniform(0, 1) < min(1, np.exp(
-                    -(1 / psets.get(b)[1] - 1 / psets.get(a)[1]) * (psets.get(b)[0] - psets.get(a)[0]))):
-                psets.get(a)[1:3], psets.get(b)[1:3] = psets.get(b)[1:3], psets.get(a)[1:3]
-            return
+        parameters = self.individual_parameters[self.individuals.index(pset)]
+        old_parameters = copy.deepcopy(parameters)
 
-        # select control vector
-        def control_selection(psets, pop_size):
-            combine = [(values, keys) for keys, values in psets.items()]
-            combine = sorted(combine, key=lambda x: x[0][0])
-            total_prob = sum(np.exp(-i - 1) for i in range(pop_size))
-            prob_weights = [np.exp(-i - 1) / total_prob for i in range(pop_size)]
-            sorted_control_vector_number = np.random.choice(range(1, pop_size + 1), 1, prob_weights)[0]
-            control_vector_number = combine[sorted_control_vector_number - 1][1]
-            return control_vector_number
+        if score <= parameters[0]:
+            self.individuals[self.individuals.index(pset)] = pset
+            self.individual_parameters[self.individuals.index(pset)][0] = score
+        elif distance_calculation(self, pset, self.num_parallel) < old_parameters[2]:
+            self.individuals[self.individuals.index(pset)] = pset
+            self.individual_parameters[self.individuals.index(pset)][0] = score
+        elif np.random.uniform(0, 1) < mh(old_parameters, score):
+            self.individuals[self.individuals.index(pset)] = pset
+            self.individual_parameters[self.individuals.index(pset)][0] = score
+        base_index = np.random.choice(range(self.num_parallel), 1)[0]
+        new_pset = self.new_individual(self, base_index)
 
-        # generate initial data points in latin hypercube fashion
-        def latin_hypercube(num_vectors, num_elements_per_vect):
-            high, low = 1, 0
-            step_size = (high - low) / num_elements_per_vect
-            lower_limits = np.arange(0, 1, step_size)
-            upper_limits = lower_limits + step_size
-            rand_points = [[np.random.uniform(lower_limits[i], upper_limits[i]) for i in range(num_elements_per_vect)]
-                           for _ in range(num_vectors)]
-            rand_points = np.asarray(rand_points)
-            return rand_points
+        self.sims_completed += 1
+        if self.sims_completed >= self.max_iterations*self.num_parallel:
+            return 'STOP'
 
-        # function for parameter determination for each iteration
-        def parameters_determination(coefficient, probability, bounds):
-            if np.random.uniform(0, 1) < probability:
-                parameter = np.random.uniform(bounds[0], bounds[1])
-            else:
-                parameter = coefficient
-            return parameter
+        return [new_pset]
 
-        # function for parameter generation (e.g. R, T, etc.)
-        def parameters_generation(i, para_bounds, pop_size):
-            coefficient = (1 / (pop_size - 1)) * np.log(para_bounds[1] / para_bounds[0])
-            return para_bounds[1] * np.exp(-coefficient * i)
-
-        # deal with the out-of-bound elements in NORMALIZED vector
-        def clipping_func(mutated_vectors, dimensions):
-            for k in range(dimensions):
-                if mutated_vectors[k] > 1 or mutated_vectors[k] < 0:
-                    mutated_vectors[k] = np.random.uniform(0, 1)
-            return mutated_vectors
-
-        # function to determine the element substitution
-        def substitution(bool_list, dimensions, ori_vect, mut_vect):
-            if not np.any(bool_list):
-                bool_list[np.random.randint(0, dimensions)] = True
-            vect = np.where(bool_list, mut_vect, ori_vect)
-            return vect
-        """
-
-        def PSADE(self):
-            """
-            obj, bounds,
-                 crossp_bound=[0.1, 0.9] #default,
-                 radius_bound=[10 ** (-6), 1] #default,
-                 weight_bound=[0.5, 1.5] #default,
-                 pop_size=20 #super-class,
-                 iterations=1000 #super-class
-            """
-            
-            #parameters_record = defaultdict(list)
-            dimensions = len(self.bounds)  # calculate the dimension of each set of population
-            init_population = latin_hypercube(pop_size, dimensions)  # initial NORMALIZED population generation
-            min_bound, max_bound = np.asarray(bounds).T  # calculate the boundary of the dataset
-            ranges = abs(min_bound - max_bound)
-            pop_denorm = min_bound + init_population * ranges  # DENORMALIZED initial dataset to fit in the bounds
-            scores = [obj(i) for i in pop_denorm]
-            max_score, min_score = max(scores), min(scores)
-            temperature_max = max_score - min_score
-            temperature_bound = [temperature_min, temperature_max]
-            fitness = np.asarray(scores)  # calculate all objective value for all sets of vectors
-            best_idx = np.argmin(fitness)
-            best = pop_denorm[best_idx]  # select the most possible set of data
-            worst_idx = np.argmax(fitness)
-            best_value = fitness[best_idx]
-            worst_value = fitness[worst_idx]
-            for a in range(pop_size):
-                value = [scores[a],
-                         parameters_generation(a, temperature_bound, pop_size),
-                         parameters_generation(a, radius_bound, pop_size),
-                         parameters_generation(a, crossp_bound, pop_size),
-                         np.random.uniform(weight_bound[0], weight_bound[1])]
-                parameters_record[a] = value
-
-            # for i in range(iterations):
-            while (abs(worst_value - best_value) > 10 ** (-6)):
-                pop_denorm = min_bound + init_population * ranges
-                randomly_compete(parameters_record, pop_size)
-                control_number = control_selection(parameters_record, pop_size)
-                # control_vectors = init_population[control_number]
-                control_parameters = parameters_record[control_number]
-                # print(control_parameters)
-                idx_candidates = [idx for idx in range(pop_size)]  # if idx != best_idx and idx != worst_idx]
-                # a = init_population[np.random.choice(idx_candidates, 1, replace=False)][0]
-                # b = init_population[np.random.choice(idx_candidates, 1, replace=False)][0]
-
-                # indicies = np.random.choice(idx_candidates, 2, replace=False)
-                indicies = np.random.choice(idx_candidates, 4, replace=False)
-
-                # c, d = init_population[indicies]
-                a, b, c, d = init_population[indicies]
-                it = a
-                radius = control_parameters[2]
-                weight = np.random.uniform(0, 1) * parameters_determination(parameters_record[indicies[0]][-1],
-                                                                            tau2, weight_bound)
-                cross_probability = parameters_determination(parameters_record[indicies[0]][-2],
-                                                             tau2, crossp_bound)
-                mutated_vectors = b + weight * (c - d)
-                r = radius * np.tan(np.pi * (np.random.uniform(0, 1) - 0.5))
-                trial = [0] * dimensions
-                for k in range(dimensions):
-                    if np.random.uniform(0, 1) < cross_probability:
-                        trial[k] = mutated_vectors[k]
-                    else:
-                        trial[k] = it[k]
-                trial = trial + r
-                trial = clipping_func(trial, dimensions)
-                trial_denorm = min_bound + trial * ranges
-                it_denorm = min_bound + it * ranges
-                local_move = [abs(trial_denorm[k] - it_denorm[k]) < radius for k in range(dimensions)]
-                f = obj(trial_denorm)
-                if f < fitness[indicies[0]]:  # if the trial reach further minimum
-                    fitness[indicies[0]] = f
-                    init_population[indicies[0]] = trial
-                    parameters_record.get(indicies[0])[0] = f
-                    pop_denorm[indicies[0]] = trial_denorm
-                    if f < fitness[best_idx]:
-                        best_idx = indicies[0]
-                        best = trial_denorm
-                # if np.all(local_move):
-                #    init_population[indicies[0]] = trial
-                #    fitness[indicies[0]] = f
-                #    parameters_record.get(indicies[0])[0] = f
-                #    pop_denorm[indicies[0]] = trial_denorm
-                elif np.random.uniform(0, 1) < mh(obj, it_denorm, trial_denorm, parameters_record[control_number][1]):
-                    # elif np.random.uniform(0, 1) > mh(obj, trial_denorm, it_denorm, parameters_record[control_number][1]):
-                    if np.random.uniform(0, 1) < tau1:
-                        for k in range(dimensions):
-                            trial[k] = trial[k] + r
-                    init_population[indicies[0]] = trial
-                    fitness[indicies[0]] = f
-                    parameters_record.get(indicies[0])[0] = f
-                    pop_denorm[indicies[0]] = trial_denorm
-                randomly_compete(parameters_record, pop_size)
-                worst_idx = np.argmax(fitness)
-                best_idx = np.argmin(fitness)
-                best_value = fitness[best_idx]
-                worst_value = fitness[worst_idx]
-                best = pop_denorm[best_idx]
-
-                print("best parameter: ", pop_denorm[best_idx])
-
-                yield best, fitness[best_idx]
 
 
 def latin_hypercube(nsamples, ndims):
