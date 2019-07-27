@@ -2826,6 +2826,7 @@ class PSADE(PSADEBase):
         self.sims_completed = 0
         self.individuals = []  # List of individuals
         self.individual_parameters = []
+        self.temperature_max = 1 # THIS IS A PLACEHOLDER FOR NOW
 
         for i in range(self.num_parallel):
             coefficient = (1 / (self.num_parallel - 1)) * np.log(self.temperature_max / self.temperature_min)
@@ -2836,7 +2837,8 @@ class PSADE(PSADEBase):
             crossp = self.crossp_min * np.exp(coefficient * i)
             weight = np.random.uniform(self.weight_min, self.weight_max)
             self.individual_parameters.append([np.Inf, temperature, radius, crossp, weight])
-        self.dimensions = self.individuals[0].__len__()
+
+        self.dimensions = 0 # self.individuals[0].__len__()
 
 
 
@@ -2893,16 +2895,16 @@ class PSADE(PSADEBase):
         # and others to cross over (always random)
 
         pickn = 3
-        randomly_compete(self)
+        self.randomly_compete()
 
         # Choose pickn random unique indices, or if base_index was given, choose base_index followed by pickn-1 unique
         # indices
-        control_number = control_selection(self)
+        control_number = self.control_selection()
         control_parameters = self.individual_parameters[control_number]
         radius = control_parameters[2]
-        weight = np.random.uniform(0, 1) * parameters_determination(self, 4, base_index, [self.weight_min, self.weight_max])
-        cross_probability = parameters_determination(self, 3, base_index, [self.crossp_min, self.crossp_max])
-        picks = np.random.choice(self.dimensions, pickn, replace=False)
+        weight = np.random.uniform(0, 1) * self.parameters_determination(4, base_index, [self.weight_min, self.weight_max])
+        cross_probability = self.parameters_determination(3, base_index, [self.crossp_min, self.crossp_max])
+        picks = np.random.choice(self.num_parallel, pickn, replace=False)
         if base_index is not None:
             if base_index in picks:
                 # If we accidentally picked base_index, replace it with picks[0], preserving uniqueness in our list
@@ -2928,12 +2930,13 @@ class PSADE(PSADEBase):
         return PSet(new_pset_vars)
         
     def start_run(self):
-        print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.population_size))
+        print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.num_parallel))
         if self.config.config['initialization'] == 'lh':
             first_psets = self.random_latin_hypercube_psets(self.num_parallel)
         else:
             first_psets = [self.random_pset() for i in range(self.num_parallel)]
         self.individuals = first_psets
+        self.dimensions = self.individuals[0].__len__()
 
         #self.ln_current_P = [np.nan]*self.num_parallel  # Forces accept on the first run
         #self.current_pset = [None]*self.num_parallel
@@ -2967,14 +2970,14 @@ class PSADE(PSADEBase):
         if score <= parameters[0]:
             self.individuals[self.individuals.index(pset)] = pset
             self.individual_parameters[self.individuals.index(pset)][0] = score
-        elif distance_calculation(self, pset, self.num_parallel) < old_parameters[2]:
+        elif self.distance_calculation(pset, self.num_parallel) < old_parameters[2]:
             self.individuals[self.individuals.index(pset)] = pset
             self.individual_parameters[self.individuals.index(pset)][0] = score
-        elif np.random.uniform(0, 1) < mh(old_parameters, score):
+        elif np.random.uniform(0, 1) < self.mh(old_parameters, score):
             self.individuals[self.individuals.index(pset)] = pset
             self.individual_parameters[self.individuals.index(pset)][0] = score
         base_index = np.random.choice(range(self.num_parallel), 1)[0]
-        new_pset = self.new_individual(self, base_index)
+        new_pset = self.new_individual(base_index)
 
         self.sims_completed += 1
         if self.sims_completed >= self.max_iterations*self.num_parallel:
