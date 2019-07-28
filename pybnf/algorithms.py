@@ -2801,8 +2801,6 @@ class PSADEBase(Algorithm):
 
         self.individuals = []
 
-
-
     def start_run(self):
         return NotImplementedError("got_result() not implemented in PSADEBase class")
 
@@ -2826,10 +2824,11 @@ class PSADE(PSADEBase):
         self.sims_completed = 0
         self.individuals = []  # List of individuals
         self.individual_parameters = []
-        self.temperature_max = None # THIS IS A PLACEHOLDER FOR NOW
+        self.temperature_max = None # Is actually determined automatically at run time
         self.test_scores = []
 
         self.dimensions = 0 # self.individuals[0].__len__()
+        self.local_search_points = {} # key=local Pset: value=[score, parent_index, direction from base to xL1]
 
 
 
@@ -2870,14 +2869,14 @@ class PSADE(PSADEBase):
             parameter = self.individual_parameters[control_number][coefficient_position]
         return parameter
 
-    def distance_calculation(self, pset):
-        temp = [(self.individuals[self.individuals.index(pset)][k] - pset[k])**2 for k in range(self.dimensions)]
+    def distance_calculation(self, pset1, pset2):
+        temp = [pset1.fps[i].diff(pset2.fps[i])for i in range(self.dimensions)]
         distance = np.sqrt(sum(temp))
         return distance
 
     def new_individual(self, base_index=None):
         """
-        Create a new individual for the specified island, according to the set strategy
+        Create a new individual for the individual at base_index in self.individuals
         :param base_index: The index to use for the new individual, or None for a random index.
         :return:
         """
@@ -2919,7 +2918,42 @@ class PSADE(PSADEBase):
                 new_pset_vars.append(p)
         new_pset_vars += r
         return PSet(new_pset_vars)
-        
+
+    def is_local_search(self, pset):
+        if pset in self.local_search_points.keys():
+            return True
+        else:
+            return False
+
+    def have_all_local_scores(self, parent_idx):
+        score_count = 0
+        for key, val in self.local_search_points.items():
+            if val[1] == parent_idx:
+                score_count += 1
+        if score_count == 2:
+            return True
+        else:
+            return False
+
+    def collect_all_local_scores(self, parent_idx):
+        scoreboard = {self.individuals[parent_idx]: self.individual_parameters[parent_idx][0]}
+        for key, val in self.local_search_points.items(): # key=Pset, val=[score, parent_idx]
+            if val[1] == parent_idx:
+                scoreboard[key] = val[0] # Pset: score
+        return scoreboard
+
+    def generate_xL2(self, pset, d, Rmax):
+        new_pset = copy.deepcopy(pset)
+        for i in range(self.dimensions):
+            new_pset.fps[i] += d[i]
+        contraction_iteration = 1
+        while self.distance_calculation(new_pset, pset) > Rmax: # contract d to within max radius
+            for i in range(self.dimensions):
+                new_pset.fps[i] -= d[i]/(2**contraction_iteration)
+            contraction_iteration += 1
+        return new_pset
+
+
     def start_run(self):
         print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.num_parallel))
         if self.config.config['initialization'] == 'lh':
@@ -2927,7 +2961,7 @@ class PSADE(PSADEBase):
         else:
             first_psets = [self.random_pset() for i in range(self.num_parallel)]
         self.individuals = first_psets
-        self.dimensions = self.individuals[0].__len__()
+        self.dimensions = len(self.individuals[0].fps)
 
         #self.ln_current_P = [np.nan]*self.num_parallel  # Forces accept on the first run
         #self.current_pset = [None]*self.num_parallel
@@ -2942,7 +2976,7 @@ class PSADE(PSADEBase):
         #    os.makedirs(self.config.config['output_dir'] + '/Results/Histograms/', exist_ok=True)
 
         return copy.deepcopy(self.individuals)
-    
+
     def got_result(self, res):
         """
         Called by the scheduler when a simulation is completed, with the pset that was run, and the resulting simulation
@@ -2977,26 +3011,71 @@ class PSADE(PSADEBase):
 
         # Run PSADE algorithm on individual
         else:
-            parameters = self.individual_parameters[self.individuals.index(pset)]
-            old_parameters = copy.deepcopy(parameters)
+            # Local search block
+            if self.is_local_search(pset):
+                parent_idx = self.local_search_points[pset][1]
+                self.local_search_points[pset][0] = score
+                if self.have_all_local_scores(parent_idx):
+                    scoreboard = self.collect_all_local_scores(parent_idx)
+                    best_Pset = scoreboard.keys()[0]
+                    best_score = scoreboard[best_Pset]
+                    for i in [1, 2]:
+                        if scoreboard[scoreboard.keys()[i]] < best_score:
+                            best_score = scoreboard.keys()[i]
+                            best_Pset = scoreboard.keys()[i]
+                    # Replace primary individual with best Pset
+                    self.individuals[parent_idx] = best_Pset
+                    self.individual_parameters[parent_idx][0] = best_score
+                    del scoreboard[best_Pset]
+                    # Delete local search nodes
+                    for key in scoreboard.keys():
+                        del self.local_search_points[key]
+                    # Return new Pset
+                    return best_Pset
 
-            if score <= parameters[0]:
-                self.individuals[self.individuals.index(pset)] = pset
-                self.individual_parameters[self.individuals.index(pset)][0] = score
-            elif self.distance_calculation(pset, self.num_parallel) < old_parameters[2]:
-                self.individuals[self.individuals.index(pset)] = pset
-                self.individual_parameters[self.individuals.index(pset)][0] = score
-            elif np.random.uniform(0, 1) < self.mh(old_parameters, score):
-                self.individuals[self.individuals.index(pset)] = pset
-                self.individual_parameters[self.individuals.index(pset)][0] = score
-            base_index = np.random.choice(range(self.num_parallel), 1)[0]
-            new_pset = self.new_individual(base_index)
+                else: # Don't yet have all local scores
+                    parent_idx = self.local_search_points[pset][1]
+                    if self.local_search_points[pset][0] < self.individual_parameters[parent_idx][0]: # We improved, move same direction
+                        # Generate xL2 in the same direction
+                        xL2 = self.generate_xL2(pset, self.local_search_points[2], self.individual_parameters[parent_idx][2])
 
-            self.sims_completed += 1
-            if self.sims_completed >= self.max_iterations*self.num_parallel:
-                return 'STOP'
+                    else:
+                        # Generate xL2 in the opposite direction
+                        xL2 = self.generate_xL2(pset, -self.generate_xL2(pset, self.local_search_points[2], self.individual_parameters[parent_idx][2]))
 
-            return [new_pset]
+                    self.local_search_points[xL2] = [np.inf, parent_idx, self.local_search_points[pset][2]]
+                    return xL2
+
+            else: # Not a local search
+                parameters = self.individual_parameters[self.individuals.index(pset)]
+                old_parameters = copy.deepcopy(parameters)
+
+                if score <= parameters[0]: # If the proposal was an improvement, accept it:
+                    self.individuals[self.individuals.index(pset)] = pset
+                    self.individual_parameters[self.individuals.index(pset)][0] = score
+
+                # WHAT IS THIS FOR?
+                #elif self.distance_calculation(pset, self.num_parallel) < old_parameters[2]:
+                #    self.individuals[self.individuals.index(pset)] = pset
+                #    self.individual_parameters[self.individuals.index(pset)][0] = score
+
+                elif np.random.uniform(0, 1) < self.mh(old_parameters, score): # Accept if worse with Metropolis-Hastings probability:
+                    self.individuals[self.individuals.index(pset)] = pset
+                    self.individual_parameters[self.individuals.index(pset)][0] = score
+                    xL1 = self.new_individual(self.individuals.index(pset))
+                    d = [xL1.fps[i].diff(pset.fps[i]) for i in range(self.dimensions)]
+                    self.local_search_points[xL1] = [np.inf, self.individuals.index(pset), d]
+                    return xL1
+
+                # Spawn a new individual in the population
+                base_index = np.random.choice(range(self.num_parallel), 1)[0]
+                new_pset = self.new_individual(base_index)
+
+                self.sims_completed += 1
+                if self.sims_completed >= self.max_iterations*self.num_parallel:
+                    return 'STOP'
+
+                return [new_pset]
 
 
 
