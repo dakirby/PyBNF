@@ -1,7 +1,8 @@
 from .context import data, algorithms, pset, objective, config
 
 import shutil
-
+from copy import deepcopy
+from numpy import any
 
 class TestPSADE:
     def __init__(self):
@@ -39,14 +40,23 @@ class TestPSADE:
     def test_updates(self):
         psade = algorithms.PSADE(self.config)
         start_params = psade.start_run()
-
         # Run iteration 1
         for i in range(19):
             res = algorithms.Result(start_params[i], self.data1s, start_params[i].name)
-            res.score = 42.
+            res.score = 42.+i*0.05 # we need different scores so that Tmax is not zero
             torun = psade.got_result(res)
             assert torun == []
         res = algorithms.Result(start_params[19], self.data1s, start_params[19].name)
-        res.score = 42.
+        res.score = 43.
         torun = psade.got_result(res)
         assert torun == psade.individuals
+
+        # Run iteration 2
+        for i in range(20):
+            res = algorithms.Result(psade.individuals[i], self.data1s, start_params[i].name)
+            res.score = 42.+i*0.051
+            torun = psade.got_result(res)
+        assert len(psade.individuals) == 20
+        assert len(psade.local_search_points) > 0 # The odds of this test failing are ~1E-60
+
+

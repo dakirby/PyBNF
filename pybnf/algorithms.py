@@ -2840,7 +2840,7 @@ class PSADE(PSADEBase):
             parameter = self.individual_parameters[idx][4]
         return parameter
 
-    def mh(old_parameters, score):
+    def mh(self, old_parameters, score):
         return min(1, np.exp(-(score - old_parameters[0]) / old_parameters[1]))
 
     # randomly pick two vecotrs and exchange their T, R if needed
@@ -2997,7 +2997,7 @@ class PSADE(PSADEBase):
                 self.temperature_max = max(self.test_scores) - min(self.test_scores)
                 # Generate parameters for each individual
                 for i in range(self.num_parallel):
-                    coefficient = (1 / (self.num_parallel - 1)) * np.log(self.temperature_max / self.temperature_min)
+                    coefficient = (1 / (self.num_parallel - 1)) * (np.log(self.temperature_max)-np.log(self.temperature_min))
                     temperature = self.temperature_max * np.exp(-coefficient * i)
                     coefficient = (1 / (self.num_parallel - 1)) * np.log(self.radius_max / self.radius_min)
                     radius = self.radius_max * np.exp(-coefficient * i)
@@ -3037,11 +3037,13 @@ class PSADE(PSADEBase):
                     parent_idx = self.local_search_points[pset][1]
                     if self.local_search_points[pset][0] < self.individual_parameters[parent_idx][0]: # We improved, move same direction
                         # Generate xL2 in the same direction
-                        xL2 = self.generate_xL2(pset, self.local_search_points[2], self.individual_parameters[parent_idx][2])
+                        xL2 = self.generate_xL2(pset, self.local_search_points[pset][2],
+                                                self.individual_parameters[parent_idx][2])
 
                     else:
                         # Generate xL2 in the opposite direction
-                        xL2 = self.generate_xL2(pset, -self.generate_xL2(pset, self.local_search_points[2], self.individual_parameters[parent_idx][2]))
+                        xL2 = self.generate_xL2(pset, [-1*i for i in self.local_search_points[pset][2]],
+                                                self.individual_parameters[parent_idx][2])
 
                     self.local_search_points[xL2] = [np.inf, parent_idx, self.local_search_points[pset][2]]
                     return xL2
@@ -3051,6 +3053,7 @@ class PSADE(PSADEBase):
                 old_parameters = copy.deepcopy(parameters)
 
                 if score <= parameters[0]: # If the proposal was an improvement, accept it:
+                    print2('Greedy acceptance')
                     self.individuals[self.individuals.index(pset)] = pset
                     self.individual_parameters[self.individuals.index(pset)][0] = score
 
@@ -3060,6 +3063,7 @@ class PSADE(PSADEBase):
                 #    self.individual_parameters[self.individuals.index(pset)][0] = score
 
                 elif np.random.uniform(0, 1) < self.mh(old_parameters, score): # Accept if worse with Metropolis-Hastings probability:
+                    print2('Performing a local search')
                     self.individuals[self.individuals.index(pset)] = pset
                     self.individual_parameters[self.individuals.index(pset)][0] = score
                     xL1 = self.new_individual(self.individuals.index(pset))
