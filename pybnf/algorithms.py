@@ -3005,7 +3005,11 @@ class PSADE(PSADEBase):
                     crossp = self.crossp_min * np.exp(coefficient * i)
                     weight = np.random.uniform(self.weight_min, self.weight_max)
                     self.individual_parameters.append([np.Inf, temperature, radius, crossp, weight])
-                return copy.deepcopy(self.individuals) # Start PSADE algorithm on all individuals
+                # Generate candidate steps for each individual
+                for i in range(self.num_parallel):
+                    new_pset = self.new_individual(i)
+                    self.candidate_points[new_pset] = i
+                return copy.deepcopy(list(self.candidate_points.keys())) # Start PSADE algorithm on all individuals
             else: # Still waiting for other test scores
                 return []
 
@@ -3081,28 +3085,30 @@ class PSADE(PSADEBase):
                 if self.sims_completed >= self.max_iterations*self.num_parallel:
                     return 'STOP'
 
+                self.candidate_points[new_pset] = base_index
+                """
+                                    else: # no local search
+                                        # Spawn a new individual in the population
+                                        base_index = np.random.choice(range(self.num_parallel), 1)[0]
+                                        new_pset = self.new_individual(base_index)
+
+                                        self.sims_completed += 1
+                                        if self.sims_completed >= self.max_iterations*self.num_parallel:
+                                            return 'STOP'
+
+                                        return [new_pset]
+                                else:
+                                    base_index = np.random.choice(range(self.num_parallel), 1)[0]
+                                    new_pset = self.new_individual(base_index)
+
+                                    self.sims_completed += 1
+                                    if self.sims_completed >= self.max_iterations*self.num_parallel:
+                                        return 'STOP'
+
+                                    return [new_pset]
+                """
                 return [new_pset]
-                """
-                    else: # no local search
-                        # Spawn a new individual in the population
-                        base_index = np.random.choice(range(self.num_parallel), 1)[0]
-                        new_pset = self.new_individual(base_index)
 
-                        self.sims_completed += 1
-                        if self.sims_completed >= self.max_iterations*self.num_parallel:
-                            return 'STOP'
-
-                        return [new_pset]
-                else:
-                    base_index = np.random.choice(range(self.num_parallel), 1)[0]
-                    new_pset = self.new_individual(base_index)
-
-                    self.sims_completed += 1
-                    if self.sims_completed >= self.max_iterations*self.num_parallel:
-                        return 'STOP'
-
-                    return [new_pset]
-                """
                     
 
 

@@ -2,7 +2,7 @@ from .context import data, algorithms, pset, objective, config
 
 import shutil
 from copy import deepcopy
-from numpy import any
+from numpy import all
 
 class TestPSADE:
     def __init__(self):
@@ -49,9 +49,10 @@ class TestPSADE:
         res = algorithms.Result(start_params[19], self.data1s, start_params[19].name)
         res.score = 43.
         torun = psade.got_result(res)
-        assert torun == psade.individuals
+        assert all(torun == [pset for pset in psade.candidate_points.keys()])
 
         # Run iteration 2
+        psade.tau1 = 1
         for i in range(20):
             res = algorithms.Result(psade.individuals[i], self.data1s, start_params[i].name)
             res.score = 42.+i*0.051
