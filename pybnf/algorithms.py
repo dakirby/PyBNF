@@ -2829,7 +2829,7 @@ class PSADE(PSADEBase):
 
         self.dimensions = 0 # self.individuals[0].__len__()
         self.local_search_points = {} # key=local Pset: value=[score, parent_index, direction from base to xL1]
-
+        self.candidate_points = {} # key=candidate Pset: value=base_index
 
 
             # function for parameter determination for each iteration
@@ -3052,34 +3052,38 @@ class PSADE(PSADEBase):
                 parameters = self.individual_parameters[self.individuals.index(pset)]
                 old_parameters = copy.deepcopy(parameters)
 
-                if score <= parameters[0]: # If the proposal was an improvement, accept it:
-                    print2('Greedy acceptance')
-                    self.individuals[self.individuals.index(pset)] = pset
-                    self.individual_parameters[self.individuals.index(pset)][0] = score
-
-                # WHAT IS THIS FOR?
-                #elif self.distance_calculation(pset, self.num_parallel) < old_parameters[2]:
+                #if score <= parameters[0]: # If the proposal was an improvement, accept it:
+                #    print2('Greedy acceptance')
                 #    self.individuals[self.individuals.index(pset)] = pset
                 #    self.individual_parameters[self.individuals.index(pset)][0] = score
 
-                elif np.random.uniform(0, 1) < self.mh(old_parameters, score): # Accept if worse with Metropolis-Hastings probability:
-                    print2('Performing a local search')
-                    self.individuals[self.individuals.index(pset)] = pset
-                    self.individual_parameters[self.individuals.index(pset)][0] = score
-                    xL1 = self.new_individual(self.individuals.index(pset))
-                    d = [xL1.fps[i].diff(pset.fps[i]) for i in range(self.dimensions)]
-                    self.local_search_points[xL1] = [np.inf, self.individuals.index(pset), d]
-                    return xL1
+                # Fixed probability
+                # elif self.distance_calculation(pset, ) < old_parameters[2]:
+                #    self.individuals[self.individuals.index(pset)] = pset
+                #    self.individual_parameters[self.individuals.index(pset)][0] = score
 
-                # Spawn a new individual in the population
-                base_index = np.random.choice(range(self.num_parallel), 1)[0]
-                new_pset = self.new_individual(base_index)
+                if np.random.uniform(0, 1) < self.mh(old_parameters, score): # Accept if worse with Metropolis-Hastings probability:
+                    # Accept point into self.individuals
+                    self.individuals[self.candidate_points[pset]] = pset
+                    self.individual_parameters[self.candidate_points[pset]][0] = score
+                    del self.candidate_points[pset] # remove from candidate points
 
-                self.sims_completed += 1
-                if self.sims_completed >= self.max_iterations*self.num_parallel:
-                    return 'STOP'
+                    if np.random.uniform(0, 1) < self.tau1:
+                        # Perform local search
+                        xL1 = self.new_individual(self.individuals.index(pset))
+                        d = [xL1.fps[i].diff(pset.fps[i]) for i in range(self.dimensions)]
+                        self.local_search_points[xL1] = [np.inf, self.individuals.index(pset), d]
+                        return xL1
+                    else: # no local search
+                        # Spawn a new individual in the population
+                        base_index = np.random.choice(range(self.num_parallel), 1)[0]
+                        new_pset = self.new_individual(base_index)
 
-                return [new_pset]
+                        self.sims_completed += 1
+                        if self.sims_completed >= self.max_iterations*self.num_parallel:
+                            return 'STOP'
+
+                        return [new_pset]
 
 
 
