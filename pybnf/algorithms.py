@@ -2942,12 +2942,12 @@ class PSADE(PSADEBase):
                 scoreboard[key] = val[0] # Pset: score
         return scoreboard
 
-    def generate_xL2(self, pset, d, Rmax):
-        new_pset = copy.deepcopy(pset)
+    def generate_xL2(self, xL1, d, Rmax):
+        new_pset = copy.deepcopy(xL1)
         for i in range(self.dimensions):
             new_pset.fps[i] += d[i]
         contraction_iteration = 1
-        while self.distance_calculation(new_pset, pset) > Rmax: # contract d to within max radius
+        while self.distance_calculation(new_pset, xL1) > Rmax: # contract d to within max radius
             for i in range(self.dimensions):
                 new_pset.fps[i] -= d[i]/(2**contraction_iteration)
             contraction_iteration += 1
