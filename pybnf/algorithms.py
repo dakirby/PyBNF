@@ -3074,6 +3074,15 @@ class PSADE(PSADEBase):
                         d = [xL1.fps[i].diff(pset.fps[i]) for i in range(self.dimensions)]
                         self.local_search_points[xL1] = [np.inf, self.individuals.index(pset), d]
                         return xL1
+                base_index = np.random.choice(range(self.num_parallel), 1)[0]
+                new_pset = self.new_individual(base_index)
+
+                self.sims_completed += 1
+                if self.sims_completed >= self.max_iterations*self.num_parallel:
+                    return 'STOP'
+
+                return [new_pset]
+                """
                     else: # no local search
                         # Spawn a new individual in the population
                         base_index = np.random.choice(range(self.num_parallel), 1)[0]
@@ -3093,6 +3102,7 @@ class PSADE(PSADEBase):
                         return 'STOP'
 
                     return [new_pset]
+                """
                     
 
 
