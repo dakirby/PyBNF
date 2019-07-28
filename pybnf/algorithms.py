@@ -3053,7 +3053,7 @@ class PSADE(PSADEBase):
                     return xL2
 
             else: # Not a local search
-                parameters = self.individual_parameters[self.individuals.index(pset)]
+                parameters = self.individual_parameters[self.candidate_points[pset]]
                 old_parameters = copy.deepcopy(parameters)
 
                 #if score <= parameters[0]: # If the proposal was an improvement, accept it:
@@ -3066,7 +3066,9 @@ class PSADE(PSADEBase):
                 #    self.individuals[self.individuals.index(pset)] = pset
                 #    self.individual_parameters[self.individuals.index(pset)][0] = score
 
-                if np.random.uniform(0, 1) < self.mh(old_parameters, score): # Accept if worse with Metropolis-Hastings probability:
+                # Accept if worse with Metropolis-Hastings probability or accept greedily if local step:
+                if np.random.uniform(0, 1) < self.mh(old_parameters, score) or \
+                        self.distance_calculation(pset, self.individuals[self.candidate_points[pset]]) < parameters[2]:
                     # Accept point into self.individuals
                     self.individuals[self.candidate_points[pset]] = pset
                     self.individual_parameters[self.candidate_points[pset]][0] = score
