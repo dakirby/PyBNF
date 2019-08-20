@@ -2812,15 +2812,79 @@ class PSADE(PSADEBase):
     """
     Implements the Parallel Simulated Annealing Differential Evolution (PSADE) algorithm,
     described in Olenšek et al 2011.
+
+    Attributes:
+            sims_completed (int): the number of rounds of differential evolution completed
+            individuals (list): a list of Pset objects which are currently the fits under consideration
+            individual_parameters (list): nested list with elements of the form
+                                          [score (float), temperature (float), radius (float),
+                                          cross probability (float on (0,1), weight (float)]
+            temperature_max (float): the maximum simulated annealing temperature, determined at runtime
+            test_scores (list): a list of current scores (floats) for each individual in self.individuals, used during
+                                determination of temperature_max
+            dimensions (int): the number of parameters in each individual (Pset)
+            local_search_points (dict): key=local Pset
+                                        value=[score, parent_index from self.individuals, direction from base to xL1]
+            candidate_points (dict): key=candidate Pset: value=base_index from self.individuals
+
+    Methods:
+            parameters_determination(): randomly mutates individual's weight parameter
+                :param idx (int): the index for the individual in self.individuals
+                :return weight (float): the value to use for the individual's weight parameter
+
+            mh: computes the Metropolis-Hastings acceptance probability
+                :param old_parameterse (list): the item from self.individual_parameters for the old Pset
+                :param score (float): the score of the new Pset
+                :return probability (float in (0,1)): the probability of acceptance
+
+            randomly_compete: randomly selects two individuals to compete, and probabilistically swaps their individual parameters
+                :param None
+                :return None
+
+            control_selection: chooses which individual to use for trial point acceptance; see Eq.6 in
+                                 Olenšek et al 2011
+                :param None
+                :return None
+
+            parameters_determination: probabilistically mutate individual parameter
+                :param coefficient_position (int): index from individual_parameters list indicating which parameter to mutate
+                :param control_number(int): index from self.individual_parameters corresponding to Pset being updated
+                :param bounds (list): [lower_bound, upper_bound]
+                :return parameter (float): the new value to use for the individual parameter
+
+            distance_calculation: computes the Euclidean distance between two Pset objects
+                :param pset1 (Pset):
+                :param pset2 (Pset):
+                :return distance (float):
+
+            new_individual: Create a new individual for the individual at base_index in self.individuals
+                :param base_index: The index to use for the new individual, or None for a random index
+                :return new_pset (Pset)
+
+            is_local_search: Decides if the Pset is in self.local_search_points
+                :param pset (Pset)
+                :return (Bool): True if Pset is in self.local_search_points, False otherwise
+
+            have_all_local_scores: Decides if local search is completed
+                :param parent_idx (int): the index of the accepted point in self.individuals
+                :return (Bool): True if there are two local search points, xL1 and xL2; False otherwise
+
+            collect_all_local_scores: Gets the scores of the parent individual and the two local search points xL1 & xL2
+                :param parent_idx (int): the index of the accepted point in self.individuals
+                :return scoreboard (dict): A dict with entries key=Pset, val=score
+
+            generate_xL2(xL1, d, Rmax): Generates the second local search point
+                :param xL1 (Pset): the first local search point
+                :param d (numpy array): the direction to step in, for each parameter in the Pset
+                :param Rmax (float): the maximum distance allowed to step from the point xL1
+                :return xL2 (Pset): the second local search point
     """
     def __init__(self, config):
         """
         Initializes algorithm based on the config object.
-
         """
         super(PSADE, self).__init__(config)
 
-        self.variables = []
         self.sims_completed = 0
         self.individuals = []  # List of individuals
         self.individual_parameters = []
@@ -2832,7 +2896,7 @@ class PSADE(PSADEBase):
         self.candidate_points = {} # key=candidate Pset: value=base_index
 
 
-            # function for parameter determination for each iteration
+    # function for parameter determination for each iteration
     def parameters_determination(self, idx):
         if np.random.uniform(0, 1) < self.tau2:
             parameter = np.random.uniform(self.weight_min, self.weight_max)

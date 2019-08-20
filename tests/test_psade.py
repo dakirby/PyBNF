@@ -55,9 +55,14 @@ class TestPSADE:
         psade.tau1 = 1
         for i in range(20):
             res = algorithms.Result(psade.individuals[i], self.data1s, start_params[i].name)
+            print(psade.local_search_points.keys())
             res.score = 42.+i*0.051
+            assert psade.temperature_max != None
+            assert psade.is_local_search(res.pset) is False
             torun = psade.got_result(res)
         assert len(psade.individuals) == 20
         assert len(psade.local_search_points) > 0 # The odds of this test failing are ~1E-60
+        print("Done")
+        assert False # Use to allow continually debugging in Nosetests
 
 
